@@ -1,171 +1,138 @@
 ---
 name: absuite-emails
 description: >
-  Send emails through the Alliance Business Suite (ABS) Email System. Covers
-  sending basic/generic emails, contact emails, tenant emails, user emails,
+  Send emails through the Alliance Business Suite (ABS) using the `absuite` CLI.
+  Covers sending basic/generic emails, contact emails, tenant emails, user emails,
   billing emails (orders, invoices, quotes), and previewing email templates.
-  Requires a valid ABS bearer token (use the `absuite` skill to authenticate first).
+  Requires an authenticated CLI session (use the `absuite-login` skill first).
   Do NOT use for managing email templates, groups, or signatures as CRM resources —
   this skill is for dispatching and previewing emails.
 ---
 
 # Alliance Business Suite — Email Sending Skill
 
-Send transactional and notification emails through the ABS platform. The email system has two layers that work together:
+Send transactional and notification emails through the ABS platform using the `absuite` CLI.
 
-## Architecture: Templates vs. Sending Endpoints
+## Architecture: Templates vs. Sending
 
-Understanding the two layers is essential:
+The email system has two layers:
 
-### Email Template Renderer (renders HTML)
+1. **Email Template Renderer** — renders email templates into HTML (stateless, no authentication needed). Accessible under `/Email/` routes on the ABS host.
+2. **Email Sending Endpoints** — orchestrate the complete pipeline: resolve recipients, render the template, and dispatch via SMTP. These are CLI commands under the `system` service.
 
-The ABS host includes an email template rendering engine that **renders email templates into HTML**. It does NOT send emails — it only produces formatted HTML output. Template endpoints accept an `EmailModel` body and return rendered HTML.
-
-- **Base URL**: `$ABSUITE_HOST_URL/Email/` (same host as the main API)
-- **Purpose**: Render branded, localized email HTML from templates
-- **Categories**: `/Email/Basic/`, `/Email/Account/`, `/Email/Billing/`, `/Email/Support/`, `/Email/Tenants/`, `/Email/Marketing/`, `/Email/Approvals/`, `/Email/Legal/`, `/Email/Security/`
-- **Authentication**: None required (template rendering is stateless)
-
-### Email Sending Endpoints (format + send)
-
-The ABS REST API has email-sending endpoints that **consume the template server internally** — they handle the complete pipeline: resolve recipients, render the template, and dispatch the email via SMTP. You call these endpoints to actually send emails.
-
-- **Base URL**: `$ABSUITE_HOST_URL/api/v2/SystemService/Emails`
-- **Purpose**: Orchestrate full email delivery (template rendering + SMTP sending)
-- **Authentication**: Bearer token required (global admin only for system emails)
-
-**As an agent, you primarily use the sending endpoints.** The template renderer is used internally by the platform. You only call template endpoints directly if you need to preview/render HTML without sending.
+**As an agent, you primarily use the sending commands.** The template renderer is used internally by the platform.
 
 ## Prerequisites
 
-1. **Authenticate first** using the `absuite` skill to obtain `ABSUITE_ACCESS_TOKEN`.
-2. **Resolve your tenant** — email operations are tenant-aware. See Tenant Resolution below.
+1. **Authenticate first** using `absuite login` (see the `absuite-login` skill).
+2. **Resolve your tenant** — email operations are tenant-aware. Either set a default:
+   ```bash
+   absuite config set --tenant-id <tenant-guid>
+   ```
+   Or pass `--TenantId` on each call.
 
-Env vars expected: `ABSUITE_HOST_URL`, `ABSUITE_ACCESS_TOKEN` (from login).
-
-## Tenant Resolution
-
-Do NOT hard-code a `TENANT_ID`. Resolve it dynamically after login:
-
-1. Call `GET /api/v2/me/tenants` to list your accessible tenants.
-2. Default to the tenant that matches the organization you work for.
-3. Store the resolved `TENANT_ID` for the session.
+### Discover Your Tenants
 
 ```bash
-# After login, resolve tenant
-TENANTS_RESPONSE=$(curl -s -X GET "$ABSUITE_HOST_URL/api/v2/me/tenants" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN")
-
-# Pick the first tenant (or match by name/domain for your organization)
-TENANT_ID=$(echo "$TENANTS_RESPONSE" | jq -r '.result[0].id')
-echo "Using tenant: $TENANT_ID"
+absuite tenants list tenants
 ```
 
-```powershell
-# After login, resolve tenant
-$headers = @{ Authorization = "Bearer $accessToken" }
-$tenants = Invoke-RestMethod -Uri "$env:ABSUITE_HOST_URL/api/v2/me/tenants" -Method GET -Headers $headers
-
-# Pick the first tenant (or match by name/domain for your organization)
-$tenantId = $tenants.result[0].id
-Write-Host "Using tenant: $tenantId"
-```
-
-When you have multiple tenants, pick the one matching your organization by comparing the tenant `name` or `domain` fields.
+Pick the tenant matching your organization.
 
 ## Approval Requirement
 
 **Sending any email through the Alliance Business Suite requires board approval before dispatch.**
 
-Before calling any email-sending endpoint, you MUST:
+Before calling any email-sending command, you MUST:
 
-1. **Draft the email** — prepare the full `EmailDispatchRequest` payload (title, message, recipients, etc.).
-2. **Request approval** — create an approval request through Paperclip with the email details, including the recipient list, subject, and message body. Tag it for the board to review.
+1. **Draft the email** — prepare the full `ObjectEmailDispatchRequest` payload.
+2. **Request approval** — create an approval request through Paperclip with the email details, including the recipient list, subject, and message body.
 3. **Wait for approval** — do NOT send the email until approval is granted. If denied, do not send.
-4. **Send only after approval** — once approved, proceed with the API call.
+4. **Send only after approval** — once approved, proceed with the CLI command.
 
-This applies to all email-sending operations: `SendBasic`, contact emails, tenant emails, user emails, and billing emails. Template previews (`/Preview`) do NOT require approval since they don't dispatch.
+This applies to all sending commands. Template previews do NOT require approval.
 
 ## Agent Identity Signing
 
-All emails sent by an agent must be signed with the agent's ABS user name. After login, fetch your profile:
+All emails sent by an agent must be signed. After login, fetch your profile:
 
 ```bash
-ME_RESPONSE=$(curl -s -X GET "$ABSUITE_HOST_URL/api/v2/me" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN")
-
-AGENT_NAME=$(echo "$ME_RESPONSE" | jq -r '.result.firstName + " " + .result.lastName')
+absuite users Get-MeAsync
 ```
 
-```powershell
-$me = Invoke-RestMethod -Uri "$env:ABSUITE_HOST_URL/api/v2/me" -Method GET -Headers $headers
-$agentName = "$($me.result.firstName) $($me.result.lastName)"
-```
-
-Append a signature line to every email message body:
+Extract `firstName` and `lastName` from the response `result`. Append a signature line to every email message body:
 
 ```
-— Sent by {AGENT_NAME}
+— Sent by {firstName} {lastName}
 ```
 
-The `/api/v2/me` response includes `firstName`, `lastName`, `fullName`, and `email`. Use `fullName` (or `firstName + lastName`) as the signing identity.
+## Command Discovery
+
+```bash
+# List all email-related system commands
+absuite system list-commands
+
+# Get help for a specific command
+absuite system admin-send-basic-email --help
+```
 
 ## Sending Emails
 
 ### Send a Basic Email
 
-Send a generic transactional email to one or more recipients. This is the most flexible endpoint — supports any content with optional CTA button and alert.
+Send a generic transactional email to one or more recipients.
 
-**Endpoint**: `POST /api/v2/SystemService/Emails/SendBasic`
-**Access**: Global administrators only (`business_owner` role)
-**Requires**: Board approval before sending (see Approval Requirement above)
+**Access**: Global administrators only (`business_owner` role).
+
+First, check the schema:
 
 ```bash
-curl -s -X POST "$ABSUITE_HOST_URL/api/v2/SystemService/Emails/SendBasic" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"title\": \"Your Weekly Report is Ready\",
-    \"message\": \"Your weekly activity report has been generated and is ready for review. Click the button below to view it.\",
-    \"buttonText\": \"View Report\",
-    \"buttonLink\": \"https://app.example.com/reports/weekly\",
-    \"alertMessage\": \"This report expires in 7 days.\",
-    \"alertType\": 3,
-    \"culture\": \"en\",
-    \"uiCulture\": \"en\",
-    \"recipients\": [\"alice@example.com\", \"bob@example.com\"]
-  }"
+absuite system admin-send-basic-email --help
 ```
 
-**Expected response**: HTTP 200 on success.
+Then send:
 
-### EmailDispatchRequest Fields
+```bash
+absuite system admin-send-basic-email --ObjectEmailDispatchRequest '{
+  "title": "Your Weekly Report is Ready",
+  "message": "Your weekly activity report has been generated and is ready for review.\n\n— Sent by Agent Name",
+  "buttonText": "View Report",
+  "buttonLink": "https://app.example.com/reports/weekly",
+  "alertMessage": "This report expires in 7 days.",
+  "alertType": "3",
+  "culture": "en",
+  "uiCulture": "en",
+  "recipients": ["alice@example.com", "bob@example.com"]
+}'
+```
+
+### ObjectEmailDispatchRequest Fields
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `title` | string | Yes | Email subject line (max 150 chars) |
-| `message` | string | Yes | Main email body text (min 10 chars) |
-| `buttonText` | string | No | CTA button label (max 50 chars) |
+| `title` | string | Yes | Email subject line |
+| `message` | string | Yes | Main email body text |
+| `buttonText` | string | No | CTA button label |
 | `buttonLink` | string (URL) | No | CTA button target URL |
 | `alertMessage` | string | No | Alert/warning banner text |
-| `alertType` | int | No | Alert style: `0`=None, `1`=Info, `2`=Error, `3`=Warning, `4`=Success, `5`=Action, `6`=Alert |
-| `culture` | string | Yes | ISO language code for content (e.g., `en`, `es`, `fr`) |
-| `uiCulture` | string | Yes | ISO language code for UI chrome (e.g., `en`, `es`) |
-| `recipients` | string[] | Yes | List of email addresses to send to (min 1) |
-| `contactIds` | string[] | No | List of ABS Contact IDs — the platform resolves their email addresses |
-| `tenantIds` | string[] | No | List of ABS Tenant IDs — the platform resolves their email addresses |
-| `userIds` | string[] | No | List of ABS User IDs — the platform resolves their email addresses |
-| `templateUrl` | string (URL) | No | Custom template URL to use instead of the default |
-| `emailTemplateId` | string | No | ID of a saved marketing email template to use |
+| `alertType` | string | No | Alert style: `0`=None, `1`=Info, `2`=Error, `3`=Warning, `4`=Success, `5`=Action, `6`=Alert |
+| `culture` | string | Yes | ISO language code for content (e.g., `en`, `es`) |
+| `uiCulture` | string | Yes | ISO language code for UI chrome |
+| `recipients` | string[] | Yes | List of email addresses |
+| `contactIds` | string[] | No | ABS Contact IDs — platform resolves their emails |
+| `tenantIds` | string[] | No | ABS Tenant IDs — platform resolves their emails |
+| `userIds` | string[] | No | ABS User IDs — platform resolves their emails |
+| `templateUrl` | string (URL) | No | Custom template URL |
+| `emailTemplateId` | string | No | ID of a saved marketing email template |
 
 ### Recipient Resolution
 
 You can target recipients in multiple ways — they can be combined:
 
-- **`recipients`** — direct email addresses (always works)
-- **`contactIds`** — ABS Contact GUIDs — platform resolves to contact emails
-- **`tenantIds`** — ABS Tenant GUIDs — platform resolves to tenant contact emails
-- **`userIds`** — ABS User GUIDs — platform resolves to user emails
+- **`recipients`** — direct email addresses
+- **`contactIds`** — ABS Contact GUIDs
+- **`tenantIds`** — ABS Tenant GUIDs
+- **`userIds`** — ABS User GUIDs
 
 ### Alert Types
 
@@ -179,226 +146,212 @@ You can target recipients in multiple ways — they can be combined:
 | `5` | Action | Action required |
 | `6` | Alert | General alert |
 
+### Send Email to a Tenant
+
+```bash
+absuite system admin-send-tenant-email --TenantId $TENANT_ID --ObjectEmailDispatchRequest '{
+  "title": "Important Update",
+  "message": "Your organization settings have been updated.\n\n— Sent by Agent Name",
+  "culture": "en",
+  "uiCulture": "en",
+  "recipients": []
+}'
+```
+
+### Send Email to a User
+
+```bash
+absuite system admin-send-user-email --UserId $USER_ID --ObjectEmailDispatchRequest '{
+  "title": "Account Notification",
+  "message": "Your account has been updated.\n\n— Sent by Agent Name",
+  "culture": "en",
+  "uiCulture": "en",
+  "recipients": []
+}'
+```
+
+### Send Email to a Contact (via CRM Service)
+
+```bash
+absuite crm send contact-email --TenantId $TENANT_ID --ContactId $CONTACT_ID --EmailDispatchRequest '{
+  "title": "Hello from ABS",
+  "message": "We have an update for you.\n\n— Sent by Agent Name",
+  "culture": "en",
+  "uiCulture": "en"
+}'
+```
+
 ## Previewing Emails
 
 Preview what a rendered email will look like without sending it.
 
-**Endpoint**: `POST /api/v2/SystemService/Emails/Preview`
-**Access**: Global administrators only (`business_owner` role)
-**Returns**: Rendered HTML
+### Preview Basic Email
 
 ```bash
-curl -s -X POST "$ABSUITE_HOST_URL/api/v2/SystemService/Emails/Preview" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"title\": \"Your Weekly Report is Ready\",
-    \"message\": \"Your weekly activity report has been generated.\",
-    \"buttonText\": \"View Report\",
-    \"buttonLink\": \"https://app.example.com/reports/weekly\",
-    \"culture\": \"en\",
-    \"uiCulture\": \"en\",
-    \"recipients\": [\"preview@example.com\"]
-  }"
+absuite system admin-preview-basic-email-template --ObjectEmailDispatchRequest '{
+  "title": "Your Weekly Report is Ready",
+  "message": "Your weekly activity report has been generated.",
+  "buttonText": "View Report",
+  "buttonLink": "https://app.example.com/reports/weekly",
+  "culture": "en",
+  "uiCulture": "en",
+  "recipients": ["preview@example.com"]
+}'
 ```
 
-**Response**: Raw HTML of the rendered email template.
+Returns rendered HTML.
 
-## Direct Template Rendering (Advanced)
+### Preview Tenant Email
 
-If you need to render template HTML directly (without going through the sending pipeline), call the template renderer on the same host. This is useful for debugging templates or building custom sending flows.
-
-**Base URL**: `$ABSUITE_HOST_URL/Email/` (same host, `/Email/` area prefix)
-
-### Basic Templates
-
-| Template | Method | Endpoint | Description |
-|---|---|---|---|
-| Action | `POST` | `/Email/Basic/Action` | Action-required email |
-| Alert | `POST` | `/Email/Basic/Alert` | General alert |
-| Error | `POST` | `/Email/Basic/Error` | Error notification |
-| Info | `POST` | `/Email/Basic/Info` | Informational notice |
-| Success | `POST` | `/Email/Basic/Success` | Success confirmation |
-| Warning | `POST` | `/Email/Basic/Warning` | Warning/caution |
-
-### Account Templates
-
-| Template | Method | Endpoint | Description |
-|---|---|---|---|
-| Welcome | `GET/POST` | `/Email/Account/Welcome` | Welcome new user |
-| New User | `GET/POST` | `/Email/Account/NewUser` | New user created |
-| Credentials | `GET/POST` | `/Email/Account/Credentials` | Credential delivery |
-| Verify Account | `GET/POST` | `/Email/Account/VerifyAccount` | Email verification |
-| Change Password | `GET/POST` | `/Email/Account/ChangePasswordRequest` | Password reset request |
-| Password Changed | `GET/POST` | `/Email/Account/PasswordChanged` | Password changed confirmation |
-| New Device | `GET/POST` | `/Email/Account/NewDevice` | New device login detected |
-
-### Billing Templates
-
-| Template | Method | Endpoint | Description |
-|---|---|---|---|
-| New Invoice | `POST` | `/Email/Billing/NewInvoice` | Invoice created |
-| Invoice Ready | `POST` | `/Email/Billing/InvoiceReady` | Invoice ready for payment |
-| Invoice Paid | `POST` | `/Email/Billing/InvoicePaidConfirmation` | Invoice paid confirmation |
-| Invoice Reminder | `POST` | `/Email/Billing/InvoiceReminder` | Invoice payment reminder |
-| Invoice Due Soon | `POST` | `/Email/Billing/InvoiceDueSoon` | Invoice approaching due date |
-| Invoice Overdue | `POST` | `/Email/Billing/InvoiceOverdue` | Invoice past due |
-| New Order | `POST` | `/Email/Billing/NewOrder` | New order placed |
-| New Payment | `POST` | `/Email/Billing/NewPayment` | Payment received |
-| New Quote | `POST` | `/Email/Billing/NewQuote` | New quote generated |
-
-### Support Templates
-
-| Template | Method | Endpoint | Description |
-|---|---|---|---|
-| New Inquiry | `POST` | `/Email/Support/NewInquiry` | New support inquiry |
-| New Ticket | `POST` | `/Email/Support/NewTicket` | New support ticket |
-| Ticket Status Changed | `POST` | `/Email/Support/TicketStatusChanged` | Ticket status update |
-
-### Template Request Body (EmailModel)
-
-When calling template endpoints directly, use this body shape:
-
-```json
-{
-  "title": "Email Subject Line",
-  "message": "Main email body text.",
-  "buttonText": "Call to Action",
-  "buttonLink": "https://example.com/action",
-  "alertMessage": "Optional alert/warning text.",
-  "alertType": 3,
-  "headerLogoUrl": "https://email.absuite.net/images/icx.logo.white.png",
-  "footerLogoUrl": "https://email.absuite.net/images/abs.logo.white.png",
-  "portalUrl": "https://example.com",
-  "trackingPixel": "tracking-id-string"
-}
+```bash
+absuite system admin-preview-tenant-email --TenantId $TENANT_ID
 ```
 
-### Template Localization
+### Preview User Email
 
-All template endpoints support localization via query parameters:
+```bash
+absuite system admin-preview-user-email-template --UserId $USER_ID
+```
 
-| Parameter | Example | Description |
-|---|---|---|
-| `culture` | `es` | Content language |
-| `ui-culture` | `es` | UI chrome language |
-| `devStyles` | `true` | Enable development-mode styling (debugging only) |
+### Preview Contact Email (via CRM Service)
 
-Example: `/Email/Basic/Action?culture=es&ui-culture=es`
+```bash
+absuite crm preview contact-email-template --TenantId $TENANT_ID --ContactId $CONTACT_ID
+```
 
 ## Managing Email Resources (Marketing Service)
 
-The Marketing Service provides CRUD endpoints for managing email resources as tenant-owned entities:
+The `marketing` service provides CRUD commands for email resources. All are tenant-scoped.
 
-### Email Templates (saved, reusable)
+### Email Templates
 
-| Action | Method | Endpoint |
-|---|---|---|
-| List templates (OData) | `GET` | `/api/v2/MarketingService/EmailTemplates` |
-| Count templates | `GET` | `/api/v2/MarketingService/EmailTemplates/Count` |
-| Get template | `GET` | `/api/v2/MarketingService/EmailTemplates/{id}` |
-| Create template | `POST` | `/api/v2/MarketingService/EmailTemplates` |
-| Update template | `PUT` | `/api/v2/MarketingService/EmailTemplates/{id}` |
-| Delete template | `DELETE` | `/api/v2/MarketingService/EmailTemplates/{id}` |
+```bash
+# List templates
+absuite marketing get email-templates-o-data --TenantId $TENANT_ID
 
-### Email Groups (recipient lists)
+# Count templates
+absuite marketing count email-templates --TenantId $TENANT_ID
 
-| Action | Method | Endpoint |
-|---|---|---|
-| List groups (OData) | `GET` | `/api/v2/MarketingService/EmailGroups` |
-| Count groups | `GET` | `/api/v2/MarketingService/EmailGroups/Count` |
-| Get group | `GET` | `/api/v2/MarketingService/EmailGroups/{id}` |
-| Create group | `POST` | `/api/v2/MarketingService/EmailGroups` |
-| Update group | `PUT` | `/api/v2/MarketingService/EmailGroups/{id}` |
-| Delete group | `DELETE` | `/api/v2/MarketingService/EmailGroups/{id}` |
+# Get template by ID
+absuite marketing list email-template-details --TenantId $TENANT_ID --EmailTemplateId $TEMPLATE_ID
+
+# Create template
+absuite marketing create email-template --TenantId $TENANT_ID --EmailTemplateCreateDto '{...}'
+
+# Update template
+absuite marketing update email-template --TenantId $TENANT_ID --EmailTemplateId $TEMPLATE_ID --EmailTemplateUpdateDto '{...}'
+
+# Delete template
+absuite marketing delete email-template --TenantId $TENANT_ID --EmailTemplateId $TEMPLATE_ID
+```
+
+### Email Groups (Recipient Lists)
+
+```bash
+# List groups
+absuite marketing get email-groups-o-data --TenantId $TENANT_ID
+
+# Count groups
+absuite marketing count email-groups --TenantId $TENANT_ID
+
+# Get group by ID
+absuite marketing list email-group-details --TenantId $TENANT_ID --EmailGroupId $GROUP_ID
+
+# Create group
+absuite marketing create email-group --TenantId $TENANT_ID --EmailGroupCreateDto '{...}'
+
+# Update group
+absuite marketing update email-group --TenantId $TENANT_ID --EmailGroupId $GROUP_ID --EmailGroupUpdateDto '{...}'
+
+# Delete group
+absuite marketing delete email-group --TenantId $TENANT_ID --EmailGroupId $GROUP_ID
+```
 
 ### Email Signatures
 
-| Action | Method | Endpoint |
-|---|---|---|
-| List signatures (OData) | `GET` | `/api/v2/MarketingService/EmailSignatures` |
-| Count signatures | `GET` | `/api/v2/MarketingService/EmailSignatures/Count` |
-| Get signature | `GET` | `/api/v2/MarketingService/EmailSignatures/{id}` |
-| Create signature | `POST` | `/api/v2/MarketingService/EmailSignatures` |
-| Update signature | `PUT` | `/api/v2/MarketingService/EmailSignatures/{id}` |
-| Delete signature | `DELETE` | `/api/v2/MarketingService/EmailSignatures/{id}` |
-
-All Marketing Service endpoints require `Authorization: Bearer` and `X-TenantId` headers.
-
-### View a Saved Email Template (rendered)
-
-Render a saved marketing email template by ID:
-
 ```bash
-curl -s -X GET "$ABSUITE_HOST_URL/api/v2/Marketing/EmailTemplates/{templateId}/View?tenantId=$TENANT_ID&data=eyB9" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN"
+# List signatures
+absuite marketing get email-signatures-o-data --TenantId $TENANT_ID
+
+# Count signatures
+absuite marketing count email-signatures --TenantId $TENANT_ID
+
+# Get signature by ID
+absuite marketing list email-signature-details --TenantId $TENANT_ID --EmailSignatureId $SIG_ID
+
+# Create signature
+absuite marketing create email-signature --TenantId $TENANT_ID --EmailSignatureCreateDto '{...}'
+
+# Update signature
+absuite marketing update email-signature --TenantId $TENANT_ID --EmailSignatureId $SIG_ID --EmailSignatureUpdateDto '{...}'
+
+# Delete signature
+absuite marketing delete email-signature --TenantId $TENANT_ID --EmailSignatureId $SIG_ID
 ```
 
-The `data` query parameter is a Base64-encoded JSON payload for template variable substitution. Use `eyB9` (Base64 for `{ }`) for an empty payload.
+Use `absuite marketing <command> --help` to see the full DTO schemas for create/update operations.
+
+## Direct Template Rendering (Advanced)
+
+If you need to render template HTML directly (without sending), the template renderer is available at `$ABSUITE_HOST_URL/Email/`. This is for debugging or custom flows — agents normally use the sending commands above.
+
+### Template Categories
+
+| Category | Base Path | Examples |
+|---|---|---|
+| Basic | `/Email/Basic/` | Action, Alert, Error, Info, Success, Warning |
+| Account | `/Email/Account/` | Welcome, NewUser, Credentials, VerifyAccount, ChangePasswordRequest |
+| Billing | `/Email/Billing/` | NewInvoice, InvoiceReady, InvoicePaid, NewOrder, NewPayment, NewQuote |
+| Support | `/Email/Support/` | NewInquiry, NewTicket, TicketStatusChanged |
+| Tenants | `/Email/Tenants/` | Tenant-specific templates |
+| Marketing | `/Email/Marketing/` | Marketing campaign templates |
+| Approvals | `/Email/Approvals/` | Approval workflow templates |
+| Legal | `/Email/Legal/` | Legal notice templates |
+| Security | `/Email/Security/` | Security alert templates |
+
+Template localization is controlled via query parameters: `?culture=es&ui-culture=es`.
+
+## Command Quick Reference
+
+| Action | CLI Command |
+|---|---|
+| Send basic email | `absuite system admin-send-basic-email --ObjectEmailDispatchRequest '{...}'` |
+| Send to tenant | `absuite system admin-send-tenant-email --TenantId <guid> --ObjectEmailDispatchRequest '{...}'` |
+| Send to user | `absuite system admin-send-user-email --UserId <guid> --ObjectEmailDispatchRequest '{...}'` |
+| Send to contact | `absuite crm send contact-email --TenantId <guid> --ContactId <guid> --EmailDispatchRequest '{...}'` |
+| Preview basic | `absuite system admin-preview-basic-email-template --ObjectEmailDispatchRequest '{...}'` |
+| Preview contact | `absuite crm preview contact-email-template --TenantId <guid> --ContactId <guid>` |
+| List templates | `absuite marketing get email-templates-o-data --TenantId <guid>` |
+| Create template | `absuite marketing create email-template --TenantId <guid> --EmailTemplateCreateDto '{...}'` |
 
 ## Critical Rules
 
-- **Board approval is REQUIRED before sending any email.** Draft the email, request approval through Paperclip, and only send after approval is granted. Previews are exempt.
-- **Sign every email with your ABS user name.** Fetch your name from `/api/v2/me` and append `— Sent by {name}` to the message body.
-- **Authenticate first.** Use the `absuite` skill to obtain a bearer token.
-- **System email endpoints require `business_owner` role.** The `SendBasic` and `Preview` endpoints are restricted to global administrators.
-- **Marketing Service endpoints require `X-TenantId`.** Email templates, groups, and signatures are tenant-scoped.
-- **Use `recipients` for direct addresses, ID fields for platform-resolved addresses.** You can combine both — `recipients` for external addresses and `contactIds`/`userIds`/`tenantIds` for platform-known entities.
-- **Never hard-code credentials, tokens, or tenant IDs.** Resolve the tenant dynamically from `/api/v2/me/tenants`.
-- **The template renderer does NOT send emails.** It only renders HTML. To actually send, use the `SystemService/Emails/SendBasic` endpoint.
-- **Localization is controlled per-request.** Always set `culture` and `uiCulture` to match the recipient's preferred language.
-- **Template endpoints live under `/Email/` on the same host.** There is no separate email server URL.
+- **Board approval is REQUIRED before sending any email.** Draft, request approval through Paperclip, and only send after approval. Previews are exempt.
+- **Sign every email with your ABS user name.** Fetch your name from `absuite users Get-MeAsync` and append `— Sent by {name}` to the message body.
+- **Authenticate first.** Use `absuite login` before any email operation.
+- **System email commands require `business_owner` role.** The send and preview commands are restricted to global administrators.
+- **Marketing Service commands require `--TenantId`.** Templates, groups, and signatures are tenant-scoped.
+- **Use `recipients` for direct addresses, ID fields for platform-resolved addresses.** Combine `recipients`, `contactIds`, `userIds`, and `tenantIds` as needed.
+- **Never hard-code credentials, tokens, or tenant IDs.** Resolve dynamically.
+- **Localization is per-request.** Always set `culture` and `uiCulture` to match the recipient's language.
+- **Use `--help` on any command for full schemas.** Don't guess parameter names — discover them.
 
-## Example: Send an Email to Contacts and Direct Recipients (bash)
+## Example: Send Email to Contacts and Direct Recipients
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
+# Assumes authenticated session and $TENANT_ID set
 
-# Assumes ABSUITE_ACCESS_TOKEN is already set (from absuite skill)
-
-curl -s -X POST "$ABSUITE_HOST_URL/api/v2/SystemService/Emails/SendBasic" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"title\": \"Monthly Newsletter: April 2026\",
-    \"message\": \"Here is your monthly update with the latest news, product updates, and upcoming events.\\n\\n— Sent by $AGENT_NAME\",
-    \"buttonText\": \"Read Full Newsletter\",
-    \"buttonLink\": \"https://app.example.com/newsletter/april-2026\",
-    \"alertMessage\": \"You are receiving this because you are subscribed to our monthly updates.\",
-    \"alertType\": 1,
-    \"culture\": \"en\",
-    \"uiCulture\": \"en\",
-    \"recipients\": [\"external-partner@example.com\"],
-    \"contactIds\": [\"$CONTACT_ID_1\", \"$CONTACT_ID_2\"],
-    \"userIds\": [\"$USER_ID_1\"]
-  }"
-
-echo "Email sent successfully."
-```
-
-## Example: Send an Email (PowerShell)
-
-```powershell
-# Assumes $accessToken is already set (from absuite skill)
-
-$body = @{
-    title        = "Monthly Newsletter: April 2026"
-    message      = "Here is your monthly update with the latest news.`n`n— Sent by $agentName"
-    buttonText   = "Read Full Newsletter"
-    buttonLink   = "https://app.example.com/newsletter/april-2026"
-    alertMessage = "You are receiving this because you are subscribed."
-    alertType    = 1
-    culture      = "en"
-    uiCulture    = "en"
-    recipients   = @("external-partner@example.com")
-    contactIds   = @("$contactId1", "$contactId2")
-} | ConvertTo-Json
-
-$headers = @{ Authorization = "Bearer $accessToken" }
-
-Invoke-RestMethod -Uri "$env:ABSUITE_HOST_URL/api/v2/SystemService/Emails/SendBasic" `
-    -Method POST -Headers $headers -ContentType "application/json" -Body $body
-
-Write-Host "Email sent successfully."
+absuite system admin-send-basic-email --ObjectEmailDispatchRequest '{
+  "title": "Monthly Newsletter: April 2026",
+  "message": "Here is your monthly update with the latest news, product updates, and upcoming events.\n\n— Sent by Agent Name",
+  "buttonText": "Read Full Newsletter",
+  "buttonLink": "https://app.example.com/newsletter/april-2026",
+  "alertMessage": "You are receiving this because you are subscribed to our monthly updates.",
+  "alertType": "1",
+  "culture": "en",
+  "uiCulture": "en",
+  "recipients": ["external-partner@example.com"],
+  "contactIds": ["contact-guid-1", "contact-guid-2"],
+  "userIds": ["user-guid-1"]
+}'
 ```

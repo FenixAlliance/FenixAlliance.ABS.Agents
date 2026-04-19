@@ -2,301 +2,261 @@
 name: absuite-contacts
 description: >
   Create, read, update, patch, and delete contacts in the Alliance Business Suite
-  (ABS) CRM Service. Covers individual and organization contacts, OData queries,
-  avatars, wallets, carts, and social profiles. Requires a valid ABS bearer token
-  (use the `absuite` skill to authenticate first).
+  (ABS) CRM Service using the `absuite` CLI. Covers individual and organization
+  contacts, avatars, wallets, carts, and social profiles. Requires an authenticated
+  CLI session (use the `absuite-login` skill to authenticate first).
 ---
 
 # Alliance Business Suite — Contacts Skill
 
-Manage contacts through the ABS CRM Service REST API. All contact endpoints are tenant-scoped and require authentication.
+Manage contacts through the `absuite` CLI's `crm` service. All contact operations are tenant-scoped and require authentication.
 
 ## Prerequisites
 
-1. **Authenticate first** using the `absuite` skill to obtain `ABSUITE_ACCESS_TOKEN`.
-2. **Know your tenant** — all contact operations require a `TenantId`. Obtain it from the WhoAmI response or `/api/v2/me/tenants`.
+1. **Authenticate first** using `absuite login` (see the `absuite-login` skill).
+2. **Set your tenant** — all contact operations require a tenant. Either set a default:
+   ```bash
+   absuite config set --tenant-id <tenant-guid>
+   ```
+   Or pass `--TenantId <guid>` on each call.
+3. **Discover commands** — run `absuite crm list-commands` to see all CRM commands, or use `--help` on any command for full parameter and output schemas.
 
-Env vars expected: `ABSUITE_HOST_URL`, `ABSUITE_ACCESS_TOKEN` (from login), and a known `TENANT_ID`.
+## Command Discovery
 
-## Base URL
+```bash
+# List all CRM commands
+absuite crm list-commands
 
-All contact endpoints live under:
+# Filter for contact-related commands
+absuite crm list-commands | grep contact
 
+# Get detailed help for any command
+absuite crm create contact --help
 ```
-$ABSUITE_HOST_URL/api/v2/CrmService/Contacts
-```
-
-## Required Headers
-
-Every request must include:
-
-| Header | Value | Purpose |
-|---|---|---|
-| `Authorization` | `Bearer $ABSUITE_ACCESS_TOKEN` | Authentication |
-| `X-TenantId` | `$TENANT_ID` | Tenant scoping — contacts are tenant-owned |
-| `Content-Type` | `application/json` | Required for POST/PUT/PATCH bodies |
-| `Accept` | `application/json` | Ensures JSON responses |
 
 ## CRUD Operations
 
 ### List Contacts
 
-Retrieve all contacts for the current tenant.
-
 ```bash
-curl -s -X GET "$ABSUITE_HOST_URL/api/v2/CrmService/Contacts" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "X-TenantId: $TENANT_ID" \
-  -H "Accept: application/json"
+absuite crm list contacts --TenantId $TENANT_ID
 ```
 
-### List Contacts with OData
-
-Use OData query parameters for filtering, selecting fields, pagination, and counting.
+### List Contacts (Extended — includes related data)
 
 ```bash
-curl -s -X GET "$ABSUITE_HOST_URL/api/v2/CrmService/Contacts/OData?\$top=100&\$select=Email,FirstName,LastName,TenantId&\$filter=tenantId%20eq%20'$TENANT_ID'" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "X-TenantId: $TENANT_ID" \
-  -H "Accept: application/json"
+absuite crm list extended-contacts --TenantId $TENANT_ID
 ```
 
-**Common OData parameters:**
+### Count Contacts
 
-| Parameter | Example | Description |
-|---|---|---|
-| `$top` | `100` | Limit number of results |
-| `$select` | `Email,FirstName,LastName` | Choose which fields to return |
-| `$filter` | `email eq 'john@example.com'` | Filter by field value |
-| `$count` | `true` | Include total count in response |
-| `$expand` | `true` | Expand navigation properties |
+```bash
+absuite crm count contacts --TenantId $TENANT_ID
+```
 
 ### List Contacts by Type
 
 **Individuals only:**
 
 ```bash
-curl -s -X GET "$ABSUITE_HOST_URL/api/v2/CrmService/Contacts/Individuals" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "X-TenantId: $TENANT_ID"
+absuite crm list business-owned-individuals --TenantId $TENANT_ID
 ```
 
 **Organizations only:**
 
 ```bash
-curl -s -X GET "$ABSUITE_HOST_URL/api/v2/CrmService/Contacts/Organizations" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "X-TenantId: $TENANT_ID"
+absuite crm list business-owned-organizations --TenantId $TENANT_ID
 ```
 
 ### Get Single Contact
 
 ```bash
-curl -s -X GET "$ABSUITE_HOST_URL/api/v2/CrmService/Contacts/$CONTACT_ID" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "X-TenantId: $TENANT_ID"
+absuite crm get contact --TenantId $TENANT_ID --ContactId $CONTACT_ID
+```
+
+### Get Extended Contact (includes related data)
+
+```bash
+absuite crm get extended-contact --TenantId $TENANT_ID --ContactId $CONTACT_ID
 ```
 
 ### Get Organization Contact
 
 ```bash
-curl -s -X GET "$ABSUITE_HOST_URL/api/v2/CrmService/Contacts/Organizations/$CONTACT_ID" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "X-TenantId: $TENANT_ID"
+absuite crm get business-owned-organization --TenantId $TENANT_ID --ContactId $CONTACT_ID
 ```
 
 ### Create Contact
 
-```bash
-curl -s -X POST "$ABSUITE_HOST_URL/api/v2/CrmService/Contacts" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "X-TenantId: $TENANT_ID" \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json" \
-  -d "{
-    \"FirstName\": \"Jane\",
-    \"LastName\": \"Doe\",
-    \"Email\": \"jane.doe@example.com\",
-    \"TenantId\": \"$TENANT_ID\"
-  }"
-```
-
-**Expected response** (HTTP 201):
-
-```json
-{
-  "isSuccess": true,
-  "result": {
-    "contactId": "<guid>",
-    "firstName": "Jane",
-    "lastName": "Doe",
-    "email": "jane.doe@example.com"
-  }
-}
-```
-
-Save `contactId` from the response for subsequent operations on this contact.
-
-**Required fields:** `FirstName`, `LastName`, `Email`, `TenantId`.
-
-### Update Contact (Full Replace)
-
-Replace the entire contact record. Include all fields — any omitted field may be cleared.
+Check the schema first:
 
 ```bash
-curl -s -X PUT "$ABSUITE_HOST_URL/api/v2/CrmService/Contacts/$CONTACT_ID" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "X-TenantId: $TENANT_ID" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"tenantId\": \"$TENANT_ID\",
-    \"type\": 0,
-    \"firstName\": \"Jane\",
-    \"lastName\": \"Smith\",
-    \"qualifiedName\": \"Jane Smith\",
-    \"email\": \"jane.smith@example.com\",
-    \"countryId\": \"USA\",
-    \"currencyId\": \"USD.USA\",
-    \"id\": \"$CONTACT_ID\"
-  }"
+absuite crm create contact --help
 ```
 
-**Common fields for full update:**
+Create:
+
+```bash
+absuite crm create contact --TenantId $TENANT_ID --ContactCreateDto '{"firstName":"Jane","lastName":"Doe","email":"jane.doe@example.com","tenantId":"'$TENANT_ID'"}'
+```
+
+The response envelope contains the new contact in the `result` field. Save the `id` for subsequent operations.
+
+**Key ContactCreateDto fields:**
 
 | Field | Type | Description |
 |---|---|---|
-| `tenantId` | string (guid) | Owner tenant |
-| `type` | int | `0` = Individual, `1` = Organization |
+| `tenantId` | string | Owner tenant (required) |
 | `firstName` | string | First name |
 | `lastName` | string | Last name |
-| `qualifiedName` | string | Display name |
 | `email` | string | Email address |
+| `type` | string | `0` = Individual, `1` = Organization |
 | `countryId` | string | Country code (e.g., `USA`, `COL`) |
 | `currencyId` | string | Currency code (e.g., `USD.USA`) |
-| `id` | string (guid) | Contact ID (must match URL) |
+| `qualifiedName` | string | Display name |
+
+Run `absuite crm create contact --help` for the full schema.
+
+### Update Contact (Full Replace)
+
+```bash
+absuite crm update contact --TenantId $TENANT_ID --ContactId $CONTACT_ID --ContactUpdateDto '{"tenantId":"'$TENANT_ID'","firstName":"Jane","lastName":"Smith","email":"jane.smith@example.com","id":"'$CONTACT_ID'"}'
+```
 
 ### Patch Contact (Partial Update)
 
-Update specific fields using JSON Patch operations. Only the specified fields are modified.
-
 ```bash
-curl -s -X PATCH "$ABSUITE_HOST_URL/api/v2/CrmService/Contacts/$CONTACT_ID" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "X-TenantId: $TENANT_ID" \
-  -H "Content-Type: application/json" \
-  -d "[
-    { \"op\": \"replace\", \"path\": \"/FirstName\", \"value\": \"Janet\" },
-    { \"op\": \"replace\", \"path\": \"/LastName\", \"value\": \"Smith\" }
-  ]"
+absuite crm patch contact --TenantId $TENANT_ID --ContactId $CONTACT_ID --Body '[{"op":"replace","path":"/FirstName","value":"Janet"},{"op":"replace","path":"/LastName","value":"Smith"}]'
 ```
 
-**JSON Patch format:** Array of operations following [RFC 6902](https://datatracker.ietf.org/doc/html/rfc6902). Supported ops: `replace`, `add`, `remove`.
+**JSON Patch format:** Array of operations following RFC 6902. Supported ops: `replace`, `add`, `remove`.
 
 ### Delete Contact
 
 ```bash
-curl -s -X DELETE "$ABSUITE_HOST_URL/api/v2/CrmService/Contacts/$CONTACT_ID" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "X-TenantId: $TENANT_ID"
+absuite crm delete contact --TenantId $TENANT_ID --ContactId $CONTACT_ID
 ```
 
 ## Related Resources
 
-Each contact has associated resources accessible via sub-endpoints.
-
 ### Get Contact Wallet
 
 ```bash
-curl -s -X GET "$ABSUITE_HOST_URL/api/v2/CrmService/Contacts/$CONTACT_ID/Wallet" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "X-TenantId: $TENANT_ID"
+absuite crm get contact-wallet --TenantId $TENANT_ID --ContactId $CONTACT_ID
 ```
 
 ### Get Contact Cart
 
 ```bash
-curl -s -X GET "$ABSUITE_HOST_URL/api/v2/CrmService/Contacts/$CONTACT_ID/Cart" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "X-TenantId: $TENANT_ID"
+absuite crm get contact-cart --TenantId $TENANT_ID --ContactId $CONTACT_ID
 ```
 
 ### Get Contact Social Profile
 
 ```bash
-curl -s -X GET "$ABSUITE_HOST_URL/api/v2/CrmService/Contacts/$CONTACT_ID/SocialProfile" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "X-TenantId: $TENANT_ID"
+absuite crm get contact-social-profile --TenantId $TENANT_ID --ContactId $CONTACT_ID
+```
+
+### List Contact Social Profiles
+
+```bash
+absuite crm list contact-profiles --TenantId $TENANT_ID --ContactId $CONTACT_ID
 ```
 
 ### Get Contact Avatar
 
 ```bash
-curl -s -X GET "$ABSUITE_HOST_URL/api/v2/CrmService/Contacts/$CONTACT_ID/Avatar" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "X-TenantId: $TENANT_ID"
+absuite crm get contact-avatar --TenantId $TENANT_ID --ContactId $CONTACT_ID
 ```
 
 ### Update Contact Avatar
 
-Upload a new avatar image using multipart form data.
-
 ```bash
-curl -s -X POST "$ABSUITE_HOST_URL/api/v2/CrmService/Contacts/$CONTACT_ID/Avatar" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "X-TenantId: $TENANT_ID" \
-  -F "Avatar=@/path/to/avatar.png"
+absuite crm update contact-avatar --TenantId $TENANT_ID --ContactId $CONTACT_ID --Avatar @/path/to/avatar.png
 ```
 
-## Endpoint Quick Reference
+## Contact Options (Key-Value Metadata)
 
-| Action | Method | Endpoint |
-|---|---|---|
-| List contacts | `GET` | `/api/v2/CrmService/Contacts` |
-| List contacts (OData) | `GET` | `/api/v2/CrmService/Contacts/OData` |
-| List individuals | `GET` | `/api/v2/CrmService/Contacts/Individuals` |
-| List organizations | `GET` | `/api/v2/CrmService/Contacts/Organizations` |
-| Get contact | `GET` | `/api/v2/CrmService/Contacts/{contactId}` |
-| Get organization | `GET` | `/api/v2/CrmService/Contacts/Organizations/{contactId}` |
-| Create contact | `POST` | `/api/v2/CrmService/Contacts` |
-| Update contact (full) | `PUT` | `/api/v2/CrmService/Contacts/{contactId}` |
-| Patch contact (partial) | `PATCH` | `/api/v2/CrmService/Contacts/{contactId}` |
-| Delete contact | `DELETE` | `/api/v2/CrmService/Contacts/{contactId}` |
-| Get wallet | `GET` | `/api/v2/CrmService/Contacts/{contactId}/Wallet` |
-| Get cart | `GET` | `/api/v2/CrmService/Contacts/{contactId}/Cart` |
-| Get social profile | `GET` | `/api/v2/CrmService/Contacts/{contactId}/SocialProfile` |
-| Get avatar | `GET` | `/api/v2/CrmService/Contacts/{contactId}/Avatar` |
-| Upload avatar | `POST` | `/api/v2/CrmService/Contacts/{contactId}/Avatar` |
+### List Contact Options
+
+```bash
+absuite crm list contact-options --TenantId $TENANT_ID --ContactId $CONTACT_ID
+```
+
+### Get Option by Key
+
+```bash
+absuite crm get contact-option-by-key --TenantId $TENANT_ID --ContactId $CONTACT_ID --ContactOptionKey my-key
+```
+
+### Create / Upsert Option
+
+```bash
+absuite crm upsert contact-option --TenantId $TENANT_ID --ContactId $CONTACT_ID --ContactOptionKey my-key --ContactOptionUpdateDto '{"value":"my-value"}'
+```
+
+## Contact Emails
+
+### Send Email to a Contact
+
+```bash
+absuite crm send contact-email --TenantId $TENANT_ID --ContactId $CONTACT_ID --EmailDispatchRequest '{"title":"Hello","message":"Your report is ready.","culture":"en","uiCulture":"en"}'
+```
+
+### Preview Contact Email
+
+```bash
+absuite crm preview contact-email-template --TenantId $TENANT_ID --ContactId $CONTACT_ID
+```
+
+## Sync Operations
+
+### Sync Current User into a Tenant's Contact List
+
+```bash
+absuite crm sync-current-holder-to-tenant --TenantId $TENANT_ID
+```
+
+### Sync a User into a Tenant's Contact List
+
+```bash
+absuite crm sync-holder-to-tenant --TenantId $TENANT_ID --UserId $USER_ID
+```
+
+## Command Quick Reference
+
+| Action | CLI Command |
+|---|---|
+| List contacts | `absuite crm list contacts --TenantId <guid>` |
+| Count contacts | `absuite crm count contacts --TenantId <guid>` |
+| List individuals | `absuite crm list business-owned-individuals --TenantId <guid>` |
+| List organizations | `absuite crm list business-owned-organizations --TenantId <guid>` |
+| Get contact | `absuite crm get contact --TenantId <guid> --ContactId <guid>` |
+| Create contact | `absuite crm create contact --TenantId <guid> --ContactCreateDto '{...}'` |
+| Update contact | `absuite crm update contact --TenantId <guid> --ContactId <guid> --ContactUpdateDto '{...}'` |
+| Patch contact | `absuite crm patch contact --TenantId <guid> --ContactId <guid> --Body '[...]'` |
+| Delete contact | `absuite crm delete contact --TenantId <guid> --ContactId <guid>` |
+| Get wallet | `absuite crm get contact-wallet --TenantId <guid> --ContactId <guid>` |
+| Get cart | `absuite crm get contact-cart --TenantId <guid> --ContactId <guid>` |
+| Get avatar | `absuite crm get contact-avatar --TenantId <guid> --ContactId <guid>` |
+| Send email | `absuite crm send contact-email --TenantId <guid> --ContactId <guid> --EmailDispatchRequest '{...}'` |
 
 ## Critical Rules
 
-- **Authenticate first.** Use the `absuite` skill to obtain a bearer token before calling any contact endpoint.
-- **Always include `X-TenantId`.** All contact operations are tenant-scoped. Omitting this header will result in errors.
-- **Use PATCH for partial updates, PUT for full replacements.** PATCH uses JSON Patch format (RFC 6902 array of operations). PUT replaces the entire contact record.
-- **Save the `contactId` after creation.** The response from `POST` includes the new contact's ID — store it for subsequent GET/PUT/PATCH/DELETE calls.
+- **Authenticate first.** Use `absuite login` before any CRM operation.
+- **Always provide a tenant context.** Set a default with `absuite config set --tenant-id` or pass `--TenantId` on each call.
+- **Use `--help` before unfamiliar commands.** It shows exact parameter names, types, DTO schemas, and return types.
+- **Use `list-commands` for discovery.** Don't guess — run `absuite crm list-commands`.
+- **Save the contact `id` after creation.** The response `result` includes the new contact's ID.
+- **Contact types:** `0` = Individual, `1` = Organization. Use `list business-owned-individuals` or `list business-owned-organizations` to filter.
+- **JSON Patch for partial updates.** Use `patch contact` with RFC 6902 operations. Use `update contact` for full replacements.
 - **Never hard-code IDs or credentials.** Use environment variables and values from API responses.
-- **Contact types:** `0` = Individual, `1` = Organization. Filter by type using the `/Individuals` and `/Organizations` sub-routes.
-- **OData for bulk queries.** Use the `/OData` endpoint when you need filtering, field selection, or pagination — it avoids fetching unnecessary data.
 
-## Example: Create Contact and Verify (bash)
+## Example: Create Contact and Verify
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-# Assumes ABSUITE_ACCESS_TOKEN and TENANT_ID are already set (from absuite skill)
-
-# Create a contact
-CREATE_RESPONSE=$(curl -s -X POST "$ABSUITE_HOST_URL/api/v2/CrmService/Contacts" \
-  -H "Authorization: Bearer $ABSUITE_ACCESS_TOKEN" \
-  -H "X-TenantId: $TENANT_ID" \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json" \
-  -d "{
-    \"FirstName\": \"Alice\",
-    \"LastName\": \"Johnson\",
-    \"Email\": \"alice.johnson@example.com\",
-    \"TenantId\": \"$TENANT_ID\"
-  }")
+# 1. Create a contact
+absuite crm create contact --TenantId $TENANT_ID --ContactCreateDto '{"firstName":"Alice","lastName":"Johnson","email":"alice.johnson@example.com","tenantId":"'$TENANT_ID'"}'
 
 CONTACT_ID=$(echo "$CREATE_RESPONSE" | jq -r '.result.contactId')
 
@@ -317,35 +277,16 @@ echo "Contact details:"
 echo "$GET_RESPONSE" | jq '.result'
 ```
 
-## Example: Create Contact and Verify (PowerShell)
 
-```powershell
-# Assumes $accessToken and $tenantId are already set (from absuite skill)
+# 2. List contacts to confirm
+absuite crm list contacts --TenantId $TENANT_ID
 
-$headers = @{
-    Authorization = "Bearer $accessToken"
-    "X-TenantId"  = $tenantId
-    Accept        = "application/json"
-}
+# 3. Get the specific contact (extract id from step 1 response)
+absuite crm get contact --TenantId $TENANT_ID --ContactId $CONTACT_ID
 
-# Create a contact
-$body = @{
-    FirstName = "Alice"
-    LastName  = "Johnson"
-    Email     = "alice.johnson@example.com"
-    TenantId  = $tenantId
-} | ConvertTo-Json
+# 4. Update the contact
+absuite crm update contact --TenantId $TENANT_ID --ContactId $CONTACT_ID --ContactUpdateDto '{"firstName":"Alice","lastName":"Smith","email":"alice.smith@example.com","tenantId":"'$TENANT_ID'","id":"'$CONTACT_ID'"}'
 
-$createResponse = Invoke-RestMethod -Uri "$env:ABSUITE_HOST_URL/api/v2/CrmService/Contacts" `
-    -Method POST -Headers $headers -ContentType "application/json" -Body $body
-
-$contactId = $createResponse.result.contactId
-Write-Host "Contact created: $contactId"
-
-# Verify by fetching it
-$contact = Invoke-RestMethod -Uri "$env:ABSUITE_HOST_URL/api/v2/CrmService/Contacts/$contactId" `
-    -Method GET -Headers $headers
-
-Write-Host "Contact details:"
-$contact.result | Format-List
+# 5. Delete the contact
+absuite crm delete contact --TenantId $TENANT_ID --ContactId $CONTACT_ID
 ```
