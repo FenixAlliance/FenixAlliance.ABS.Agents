@@ -133,7 +133,7 @@ absuite <service> <command> --help
 Example:
 
 ```bash
-absuite crm "list contacts" --help
+absuite crm list contacts --help
 ```
 
 The `--help` output includes:
@@ -158,7 +158,7 @@ absuite <service> <verb> <entity> --ParamName value
 ### Passing Simple Parameters
 
 ```bash
-absuite crm "get contact" --TenantId "my-tenant-guid" --ContactId "abc-123"
+absuite crm get contact --TenantId my-tenant-guid --ContactId abc-123
 ```
 
 ### Passing JSON Object Parameters
@@ -166,13 +166,13 @@ absuite crm "get contact" --TenantId "my-tenant-guid" --ContactId "abc-123"
 For parameters that accept a DTO (shown as `<SomeCreateDto>` in help), pass a JSON string:
 
 ```bash
-absuite crm "create contact" --TenantId "my-tenant-guid" --ContactCreateDto '{"firstName":"John","lastName":"Doe","email":"john@example.com"}'
+absuite crm create contact --TenantId my-tenant-guid --ContactCreateDto '{"firstName":"John","lastName":"Doe","email":"john@example.com"}'
 ```
 
 ### Using the Canonical Function Name
 
 ```bash
-absuite crm Get-ContactsAsync --TenantId "my-tenant-guid"
+absuite crm Get-ContactsAsync --TenantId my-tenant-guid
 ```
 
 ---
@@ -192,7 +192,7 @@ absuite config set --tenant-id <tenant-guid>
 Then call without `--TenantId`:
 
 ```bash
-absuite crm "list contacts"
+absuite crm list contacts
 ```
 
 ### Option 2: Per-Call Tenant
@@ -200,7 +200,7 @@ absuite crm "list contacts"
 Pass explicitly on each call:
 
 ```bash
-absuite crm "list contacts" --TenantId <tenant-guid>
+absuite crm list contacts --TenantId <tenant-guid>
 ```
 
 ### Discovering Available Tenants
@@ -291,7 +291,7 @@ The CLI uses consistent verb patterns across all services:
 Force a specific MIME type for the response:
 
 ```bash
-absuite crm "list contacts" --TenantId <guid> --ReturnType "application/xml"
+absuite crm list contacts --TenantId <guid> --ReturnType application/xml
 ```
 
 ### Full HTTP Response
@@ -299,7 +299,7 @@ absuite crm "list contacts" --TenantId <guid> --ReturnType "application/xml"
 Get the full response including status code and headers:
 
 ```bash
-absuite crm "list contacts" --TenantId <guid> --WithHttpInfo
+absuite crm list contacts --TenantId <guid> --WithHttpInfo
 ```
 
 ---
@@ -311,22 +311,22 @@ absuite crm "list contacts" --TenantId <guid> --WithHttpInfo
 absuite crm list-commands
 
 # 2. Check parameter schema
-absuite crm "create contact" --help
+absuite crm create contact --help
 
 # 3. Create a contact
-absuite crm "create contact" --TenantId $TENANT_ID --ContactCreateDto '{"firstName":"Alice","lastName":"Smith","email":"alice@example.com"}'
+absuite crm create contact --TenantId $TENANT_ID --ContactCreateDto '{"firstName":"Alice","lastName":"Smith","email":"alice@example.com"}'
 
 # 4. List contacts to find the new one
-absuite crm "list contacts" --TenantId $TENANT_ID
+absuite crm list contacts --TenantId $TENANT_ID
 
 # 5. Get a specific contact
-absuite crm "get contact" --TenantId $TENANT_ID --ContactId <contact-guid>
+absuite crm get contact --TenantId $TENANT_ID --ContactId <contact-guid>
 
 # 6. Update the contact
-absuite crm "update contact" --TenantId $TENANT_ID --ContactId <contact-guid> --ContactUpdateDto '{"firstName":"Alice","lastName":"Johnson"}'
+absuite crm update contact --TenantId $TENANT_ID --ContactId <contact-guid> --ContactUpdateDto '{"firstName":"Alice","lastName":"Johnson"}'
 
 # 7. Delete the contact
-absuite crm "delete contact" --TenantId $TENANT_ID --ContactId <contact-guid>
+absuite crm delete contact --TenantId $TENANT_ID --ContactId <contact-guid>
 ```
 
 ---
